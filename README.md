@@ -12,7 +12,7 @@ memory>=4GB
 ## Folders
 
 Bi_LSTM: Bidirectional LSTM sequence models. 
-Root File: BiLSTM.m
+Root File: BiLSTM.m.  file "lr001" contains store results in 10 different tries. You can get fine-grained accruacy around 0.50. 
 
 Hier_Bi_LSTM : Hierarhical (two-level, word level and clause level) LSTM sequence models. 
 Root file: HierLSTM.m

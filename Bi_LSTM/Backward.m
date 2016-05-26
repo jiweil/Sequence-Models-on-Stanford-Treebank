@@ -1,24 +1,21 @@
 function[grad]=Backward(batch,grad,parameter,lstms,all_c_t,lstms_r,all_c_t_r)
-    % backward propagation
     N=size(batch.Word,1);
     T=batch.MaxLen;
-    zeroState=zeroMatrix([parameter.hidden,N],parameter.isGPU);
+    zeroState=zeroMatrix([parameter.hidden,N]);
     dh = cell(parameter.layer_num, 1);
     dc = cell(parameter.layer_num, 1);
     for ll=1:parameter.layer_num    
-        grad.W{ll}=zeroMatrix(size(parameter.W{ll}),parameter.isGPU);
-        grad.V{ll}=zeroMatrix(size(parameter.W{ll}),parameter.isGPU);
+        grad.W{ll}=zeroMatrix(size(parameter.W{ll}));
+        grad.V{ll}=zeroMatrix(size(parameter.W{ll}));
     end
     wordCount = 0;
     numInputWords=size(batch.Word,1)*size(batch.Word,2);
-    allEmbGrads=zeroMatrix([parameter.dimension,numInputWords],parameter.isGPU);
+    allEmbGrads=zeroMatrix([parameter.dimension,numInputWords]);
 
     for ll=parameter.layer_num:-1:1 
         dh{ll} = zeroState;
         dc{ll} = zeroState;
     end
-
-    % backward propagation from right to left
     for t=T:-1:1
         unmaskedIds=batch.Left{t};
         for ll=parameter.layer_num:-1:1
@@ -31,7 +28,7 @@ function[grad]=Backward(batch,grad,parameter,lstms,all_c_t,lstms_r,all_c_t_r)
             c_t=all_c_t{ll, t};
             lstm = lstms{ll, t};
             W=parameter.W{ll};
-            [lstm_grad]=lstmUnitGrad(lstm, c_t, c_t_1, dc{ll}, dh{ll},ll, t,zeroState,parameter,W);
+            [lstm_grad]=lstmUnitGrad(W,lstm, c_t, c_t_1, dc{ll}, dh{ll},ll, t,zeroState,parameter);
             dc{ll} = lstm_grad.dc;
             dh{ll} = lstm_grad.input(end-parameter.hidden+1:end, :);
             grad.W{ll}=grad.W{ll}+lstm_grad.W;
@@ -51,10 +48,7 @@ function[grad]=Backward(batch,grad,parameter,lstms,all_c_t,lstms_r,all_c_t_r)
     allEmbIndices(wordCount+1:end) = [];
     [grad.W_emb, grad.indices] = aggregateMatrix(allEmbGrads, allEmbIndices);
 
-    allEmbGrads=zeroMatrix([parameter.dimension,numInputWords],parameter.isGPU);
-
-
-    % backward propagation from left to right
+    allEmbGrads=zeroMatrix([parameter.dimension,numInputWords]);
     for ll=parameter.layer_num:-1:1 
         dh{ll} = zeroState;
         dc{ll} = zeroState;
@@ -71,7 +65,7 @@ function[grad]=Backward(batch,grad,parameter,lstms,all_c_t,lstms_r,all_c_t_r)
             c_t=all_c_t_r{ll, t};
             lstm = lstms_r{ll, t};
             W=parameter.V{ll};
-            [lstm_grad]=lstmUnitGrad(lstm, c_t, c_t_1, dc{ll}, dh{ll},ll, t,zeroState,parameter,W);
+            [lstm_grad]=lstmUnitGrad(W,lstm, c_t, c_t_1, dc{ll}, dh{ll},ll, t,zeroState,parameter);
             dc{ll} = lstm_grad.dc;
             dh{ll} = lstm_grad.input(end-parameter.hidden+1:end, :);
             grad.V{ll}=grad.V{ll}+lstm_grad.W;
@@ -87,7 +81,6 @@ function[grad]=Backward(batch,grad,parameter,lstms,all_c_t,lstms_r,all_c_t_r)
             end
         end
     end
-    % word imbedding updates
 
     clear dc;
     clear dh;
@@ -107,9 +100,10 @@ function[grad]=Backward(batch,grad,parameter,lstms,all_c_t,lstms_r,all_c_t_r)
 end
 
 
-function[lstm_grad]=lstmUnitGrad(lstm, c_t, c_t_1, dc, dh, ll, t, zero_state,parameter,W)
-    dc = arrayfun(@plusMult, dc, lstm.o_gate, dh);
-    do = arrayfun(@sigmoidPrimeTriple, lstm.o_gate, c_t, dh);
+function[lstm_grad]=lstmUnitGrad(W,lstm, c_t, c_t_1, dc, dh, ll, t, zero_state,parameter)
+    dc =arrayfun(@plusTanhPrimeTriple,dc,lstm.f_c_t,lstm.o_gate, dh);
+    %dc = arrayfun(@plusMult, dc, lstm.o_gate, dh);
+    do = arrayfun(@sigmoidPrimeTriple, lstm.o_gate, lstm.f_c_t, dh);
     di = arrayfun(@sigmoidPrimeTriple, lstm.i_gate, lstm.a_signal, dc);
 
     if t>1 
@@ -118,23 +112,16 @@ function[lstm_grad]=lstmUnitGrad(lstm, c_t, c_t_1, dc, dh, ll, t, zero_state,par
         df = zero_state;
     end
     lstm_grad.dc = lstm.f_gate.*dc;
-    if parameter.activation==1
-        dl = arrayfun(@tanhPrimeTriple, lstm.a_signal, lstm.i_gate, dc);
-    else if parameter.activation==2
-        dl= arrayfun(@tanh_cube,lstm.a_signal,lstm.store,lstm.i_gate, dc);
-    end
-    end
+    dl = arrayfun(@tanhPrimeTriple, lstm.a_signal, lstm.i_gate, dc);
     d_ifoa = [di; df; do; dl];
     lstm_grad.W = d_ifoa*lstm.input'; %dw
-    lstm_grad.input =W'*d_ifoa;% dx dh
-    if parameter.dropout~=0 
+    lstm_grad.input = W'*d_ifoa;
+    if parameter.dropout~=0
         lstm_grad.input=lstm_grad.input.*lstm.drop_left;
     end
+    clear dc; clear do; clear di; clear df; clear d_ifoa;
 end
 
-function[value]=tanh_cube(x,y,z,m)
-    value=(1-x*x)*(3*y^2+1)*z*m;
-end
 
 function [value] = plusTanhPrimeTriple(t, x, y, z)
     value = t + (1-x*x)*y*z;
@@ -149,3 +136,9 @@ function [value] = sigmoidPrimeTriple(x, y, z)
     value = x*(1-x)*y*z;
 end
 
+function [clippedValue] = clipBackward(x)
+    if x>1000 clippedValue = single(1000);
+    elseif x<-1000 clippedValue = single(-1000);
+    else clippedValue =single(x);
+    end
+end
