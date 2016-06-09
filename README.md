@@ -14,6 +14,8 @@ memory>=4GB
 Bi_LSTM: Bidirectional LSTM sequence models. 
 Root File: BiLSTM.m.  file "lr001" contains store results in 10 different tries. You can get fine-grained accruacy around 0.50. 
 
+Bi_LSTM_in_Torch: due to licensing restrictions on matlab, we reimplemeted the bi-directional LSTM using torch.
+
 Hier_Bi_LSTM : Hierarhical (two-level, word level and clause level) LSTM sequence models. 
 Root file: HierLSTM.m
 
